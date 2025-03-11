@@ -13,7 +13,7 @@ const AuthPage = () => {
     <div className="flex justify-center items-center min-h-screen bg-neutral-900 text-white relative overflow-hidden">
       {/* Background Animation */}
       <motion.div
-        className="absolute inset-0 bg-gradient-to-br from-green-300  via-neutral-600 to-black opacity-40"
+        className="absolute inset-0 bg-gradient-to-br from-green-300  via-n eutral-600 to-black opacity-40"
         animate={{ scale: [1, 1.2, 1], rotate: [0, 3, -3, 0] }}
         transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
       />
