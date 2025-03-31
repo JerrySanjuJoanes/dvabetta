@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet"; // Use MapContainer and React-Leaflet components
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
@@ -14,8 +14,14 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
 });
 
-// Custom component to handle routing
-const RoutingMachine = ({ startPoint, endPoint, setDistance }) => {
+// Custom component to handle routing and filtering stations
+const RoutingMachine = ({
+  startPoint,
+  endPoint,
+  setDistance,
+  setStationsOnRoute,
+  fuelStations,
+}) => {
   const map = useMap();
 
   useEffect(() => {
@@ -33,12 +39,7 @@ const RoutingMachine = ({ startPoint, endPoint, setDistance }) => {
         L.latLng(endPoint), // End Point
       ],
       routeWhileDragging: true, // Allow dragging waypoints
-      showAlternatives: true, // Enable alternative routes
-      altLineOptions: {
-        styles: [
-          { color: "green", opacity: 0.7, weight: 4 }, // Style for alternative routes
-        ],
-      },
+      showAlternatives: false, // Disable alternative routes
       lineOptions: {
         styles: [{ color: "blue", opacity: 0.7, weight: 4 }], // Style for the main route
       },
@@ -46,6 +47,25 @@ const RoutingMachine = ({ startPoint, endPoint, setDistance }) => {
       .on("routesfound", (e) => {
         const route = e.routes[0];
         setDistance((route.summary.totalDistance / 1000).toFixed(2)); // Convert distance to kilometers
+
+        // Find fuel stations within 5km of the route
+        const stationsOnRoute = [];
+        const routeCoordinates = route.coordinates;
+
+        // Check each fuel station's proximity to the route
+        fuelStations.forEach((station) => {
+          const stationLatLng = L.latLng(station.lat, station.lon);
+          const isCloseToRoute = routeCoordinates.some((coord) => {
+            const routeLatLng = L.latLng(coord.lat, coord.lng);
+            return stationLatLng.distanceTo(routeLatLng) <= 5000; // 5km buffer
+          });
+
+          if (isCloseToRoute) {
+            stationsOnRoute.push(station);
+          }
+        });
+
+        setStationsOnRoute(stationsOnRoute); // Update the state with stations on the route
       })
       .addTo(map);
 
@@ -57,7 +77,14 @@ const RoutingMachine = ({ startPoint, endPoint, setDistance }) => {
         map.removeControl(map._routingControl);
       }
     };
-  }, [startPoint, endPoint, map, setDistance]);
+  }, [
+    startPoint,
+    endPoint,
+    map,
+    setDistance,
+    setStationsOnRoute,
+    fuelStations,
+  ]);
 
   return null;
 };
@@ -69,6 +96,7 @@ const Map = () => {
   const [searchResults, setSearchResults] = useState([]); // Search results for the destination
   const [distance, setDistance] = useState(null); // Total distance of the route
   const [fuelStations, setFuelStations] = useState([]); // Fuel stations data
+  const [stationsOnRoute, setStationsOnRoute] = useState([]); // Fuel stations within 5km of the route
 
   useEffect(() => {
     // Fetch user's current location
@@ -184,8 +212,9 @@ const Map = () => {
               key={index}
               position={[station.lat, station.lon]}
               icon={L.icon({
-                iconUrl:
-                  "https://cdn-icons-png.flaticon.com/512/190/190411.png",
+                iconUrl: stationsOnRoute.includes(station)
+                  ? "https://cdn-icons-png.flaticon.com/512/190/190411.png" // Icon for stations within 5km
+                  : "https://cdn-icons-png.flaticon.com/512/854/854878.png", // Icon for other stations
                 iconSize: [25, 25],
               })}
             >
@@ -197,6 +226,8 @@ const Map = () => {
               startPoint={startPoint}
               endPoint={endPoint}
               setDistance={setDistance}
+              setStationsOnRoute={setStationsOnRoute}
+              fuelStations={fuelStations}
             />
           )}
         </MapContainer>
