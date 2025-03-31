@@ -1,38 +1,96 @@
-import { useState, useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet-routing-machine";
+import React, { useEffect, useState } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet"; // Use MapContainer and React-Leaflet components
 import "leaflet/dist/leaflet.css";
+import L from "leaflet";
 import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
-import { BsFillFuelPumpFill } from "react-icons/bs";
-import fuel from "../assets/fuel.png";
+import "leaflet-routing-machine";
 
-// Custom Icons
-const userIcon = L.icon({ iconUrl: "/user-icon.png", iconSize: [30, 30] });
-const destinationIcon = L.icon({
-  iconUrl: "/destination-icon.png",
-  iconSize: [30, 30],
+// Fix for default Leaflet marker icon not displaying
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
 });
-const fuelPumpIcon = L.icon({
-  iconUrl: fuel,
-  iconSize: [15, 15],
-});
+
+// Custom component to handle routing
+const RoutingMachine = ({ startPoint, endPoint, setDistance }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!startPoint || !endPoint) return;
+
+    // Remove any existing routing controls
+    if (map._routingControl) {
+      map.removeControl(map._routingControl);
+    }
+
+    // Add a new routing control
+    const routingControl = L.Routing.control({
+      waypoints: [
+        L.latLng(startPoint), // Start Point
+        L.latLng(endPoint), // End Point
+      ],
+      routeWhileDragging: true, // Allow dragging waypoints
+      showAlternatives: true, // Enable alternative routes
+      altLineOptions: {
+        styles: [
+          { color: "green", opacity: 0.7, weight: 4 }, // Style for alternative routes
+        ],
+      },
+      lineOptions: {
+        styles: [{ color: "blue", opacity: 0.7, weight: 4 }], // Style for the main route
+      },
+    })
+      .on("routesfound", (e) => {
+        const route = e.routes[0];
+        setDistance((route.summary.totalDistance / 1000).toFixed(2)); // Convert distance to kilometers
+      })
+      .addTo(map);
+
+    // Store the routing control on the map instance for future reference
+    map._routingControl = routingControl;
+
+    return () => {
+      if (map._routingControl) {
+        map.removeControl(map._routingControl);
+      }
+    };
+  }, [startPoint, endPoint, map, setDistance]);
+
+  return null;
+};
 
 const Map = () => {
-  const [userLocation, setUserLocation] = useState(null);
-  const [destination, setDestination] = useState([10.7867, 76.6548]);
-  const [searchInput, setSearchInput] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
-  const [bbox, setBbox] = useState(null);
-  const [distance, setDistance] = useState(null);
-  const [fuelStations, setFuelStations] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [startPoint, setStartPoint] = useState(null); // Default start point (user's location)
+  const [endPoint, setEndPoint] = useState(null); // Destination point
+  const [searchInput, setSearchInput] = useState(""); // Search input for the destination
+  const [searchResults, setSearchResults] = useState([]); // Search results for the destination
+  const [distance, setDistance] = useState(null); // Total distance of the route
+  const [fuelStations, setFuelStations] = useState([]); // Fuel stations data
 
-  // Fetch fuel stations in Kerala
   useEffect(() => {
+    // Fetch user's current location
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setStartPoint([latitude, longitude]); // Set the starting point to the user's location
+      },
+      (error) => {
+        console.error("Error fetching location:", error);
+        alert(
+          "Unable to fetch your location. Please enable location services."
+        );
+      }
+    );
+  }, []);
+
+  useEffect(() => {
+    // Fetch fuel stations in Kerala
     const fetchFuelStations = async () => {
       try {
-        const bbox1 = "8.0883,74.5236,12.8185,77.5857"; // Kerala
+        const bbox1 = "8.0883,74.5236,12.8185,77.5857"; // Kerala bounding box
         const apiUrl = `https://overpass-api.de/api/interpreter?data=[out:json];node["amenity"="fuel"](${bbox1});out body;`;
         const response = await fetch(apiUrl);
         if (!response.ok) throw new Error("Failed to fetch fuel stations");
@@ -46,140 +104,112 @@ const Map = () => {
         setFuelStations(stations);
       } catch (error) {
         console.error("Error fetching fuel station data:", error);
-      } finally {
-        setLoading(false);
       }
     };
+
     fetchFuelStations();
   }, []);
 
-  // Get User Location
-  useEffect(() => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-        setUserLocation([lat, lon]);
-        setBbox([lon - 0.5, lat - 0.5, lon + 0.5, lat + 0.5]);
-      },
-      (error) => console.error("Error getting location", error),
-      { enableHighAccuracy: true }
-    );
-  }, []);
+  const handleSearch = async () => {
+    if (!searchInput) return;
 
-  const fetchSuggestions = async (query) => {
-    if (!query) return setSuggestions([]);
-    setLoading(true);
-    let url = `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=5`;
-    if (bbox) url += `&viewbox=${bbox.join(",")}&bounded=1`;
-
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${searchInput}`;
     try {
       const response = await fetch(url);
       const data = await response.json();
-      setSuggestions(data);
+      setSearchResults(data);
     } catch (error) {
-      console.error("Error fetching suggestions", error);
-    } finally {
-      setLoading(false);
+      console.error("Error fetching search results:", error);
     }
   };
 
-  const handleSelectLocation = (lat, lon, display_name) => {
-    setDestination([parseFloat(lat), parseFloat(lon)]);
-    setSearchInput(display_name);
-    setSuggestions([]);
+  const handleSelectLocation = (lat, lon) => {
+    setEndPoint([lat, lon]); // Update the destination point
+    setSearchResults([]); // Clear search results
   };
 
   return (
-    <div className="h-[200px] w-full">
-      <div className="absolute bottom-0 right-4 z-50 w-80">
+    <div className="h-[500px] w-screen ">
+      {/* Search Bar for Destination */}
+      <div className="absolute bottom-4 left-4 z-10 bg-white p-2 rounded shadow-md w-72">
         <input
           type="text"
-          placeholder="Search for a destination..."
+          placeholder="Search destination"
           value={searchInput}
-          onChange={(e) => fetchSuggestions(e.target.value)}
-          className="w-full p-3 border rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+          onChange={(e) => setSearchInput(e.target.value)}
+          className="border p-2 w-full rounded mb-2"
         />
-        {loading && (
-          <div className="text-gray-500 text-sm mt-2">Loading...</div>
-        )}
-        {suggestions.length > 0 && (
-          <ul className="mt-2 border rounded-lg shadow-lg overflow-hidden">
-            {suggestions.map((item, index) => (
+        <button
+          onClick={handleSearch}
+          className="mb-2 bg-green-500 text-white px-4 py-2 rounded w-full"
+        >
+          Search Destination
+        </button>
+        {searchResults.length > 0 && (
+          <ul className="bg-white border rounded shadow-md max-h-40 overflow-auto">
+            {searchResults.map((result, index) => (
               <li
                 key={index}
+                className="p-2 cursor-pointer hover:bg-gray-200"
                 onClick={() =>
-                  handleSelectLocation(item.lat, item.lon, item.display_name)
+                  handleSelectLocation(
+                    parseFloat(result.lat),
+                    parseFloat(result.lon)
+                  )
                 }
-                className="p-3 cursor-pointer hover:bg-blue-50"
               >
-                {item.display_name}
+                {result.display_name}
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      {userLocation && (
+      {/* Map */}
+      {startPoint && (
         <MapContainer
-          center={userLocation}
-          zoom={13}
-          className="h-full w-full rounded-lg"
+          center={startPoint}
+          zoom={11}
+          style={{ height: "100%", width: "100%" }}
         >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          <Marker position={userLocation} icon={userIcon}>
-            <Popup>Your Location</Popup>
-          </Marker>
-          <Marker position={destination} icon={destinationIcon}>
-            <Popup>Destination</Popup>
-          </Marker>
-          <Routing
-            userLocation={userLocation}
-            destination={destination}
-            setDistance={setDistance}
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
+          <Marker position={startPoint}>
+            <Popup>You are here!</Popup>
+          </Marker>
           {fuelStations.map((station, index) => (
             <Marker
               key={index}
               position={[station.lat, station.lon]}
-              icon={fuelPumpIcon}
+              icon={L.icon({
+                iconUrl:
+                  "https://cdn-icons-png.flaticon.com/512/190/190411.png",
+                iconSize: [25, 25],
+              })}
             >
-              <BsFillFuelPumpFill className="" />
               <Popup>{station.name}</Popup>
             </Marker>
           ))}
+          {endPoint && (
+            <RoutingMachine
+              startPoint={startPoint}
+              endPoint={endPoint}
+              setDistance={setDistance}
+            />
+          )}
         </MapContainer>
       )}
 
+      {/* Display Total Distance */}
       {distance && (
-        <div className="absolute bottom-4 left-4 z-10 bg-white p-4 rounded-lg shadow-lg">
-          <p className="text-xl font-semibold">
-            Total Distance: {distance.toFixed(2)} km
-          </p>
+        <div className="absolute bottom-4 right-4 bg-white p-2 rounded shadow-md">
+          <p>Total Distance: {distance} km</p>
         </div>
       )}
     </div>
   );
-};
-
-const Routing = ({ userLocation, destination, setDistance }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    const routingControl = L.Routing.control({
-      waypoints: [L.latLng(userLocation), L.latLng(destination)],
-      routeWhileDragging: true,
-    })
-      .on("routesfound", (e) => {
-        const summary = e.routes[0].summary;
-        setDistance(summary.totalDistance / 1000);
-      })
-      .addTo(map);
-
-    return () => map.removeControl(routingControl);
-  }, [map, userLocation, destination, setDistance]);
-
-  return null;
 };
 
 export default Map;
